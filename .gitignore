@@ -1,0 +1,26 @@
+# Keil MDK build output
+/MDK-ARM/02LCD_F4/
+/MDK-ARM/startup_stm32f407xx.lst
+/MDK-ARM/02LCD_F4.12333
+*.o
+*.obj
+*.crf
+*.d
+*.dep
+*.lnp
+*.axf
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.build_log.htm
+*.htm
+
+# Keil user-specific settings
+*.uvoptx
+*.uvguix.*
+*.dbgconf
+
+# embeddedskills local state
+/.embeddedskills/
