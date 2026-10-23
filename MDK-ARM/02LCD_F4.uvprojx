@@ -110,9 +110,9 @@
         </CommonProperty>
         <DllOption>
           <SimDllName>SARMCM3.DLL</SimDllName>
-          <SimDllArguments>-REMAP -MPU</SimDllArguments>
-          <SimDlgDll>DCM.DLL</SimDlgDll>
-          <SimDlgDllArguments>-pCM4</SimDlgDllArguments>
+          <SimDllArguments></SimDllArguments>
+          <SimDlgDll>DARMSTM.DLL</SimDlgDll>
+          <SimDlgDllArguments>-pSTM32F407ZG</SimDlgDllArguments>
           <TargetDllName>SARMCM3.DLL</TargetDllName>
           <TargetDllArguments>-MPU</TargetDllArguments>
           <TargetDlgDll>TCM.DLL</TargetDlgDll>
@@ -646,6 +646,21 @@
               <FileName>stm32f4xx_hal_msp.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f4xx_hal_msp.c</FilePath>
+            </File>
+            <File>
+              <FileName>hmi_driver.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/hmi_driver.c</FilePath>
+            </File>
+            <File>
+              <FileName>hmi_user_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/hmi_user_uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>cmd_queue.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/cmd_queue.c</FilePath>
             </File>
           </Files>
         </Group>

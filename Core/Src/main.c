@@ -23,6 +23,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+/* 大彩串口屏 HMI 驱动（触摸人机交互） */
+#include "hmi_driver.h"
+#include "hmi_user_uart.h"
+#include "cmd_queue.h"
+#include "cmd_process.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,7 +47,7 @@
 #define MODE_TRIG      0
 #define MODE_VERT      1
 #define MODE_HORI      2
-#define MODE_CH_SEL    3   /* ������ͨ��ѡ��ģʽ */
+#define MODE_CH_SEL    3   /* ������ͨ��ѡ��ģʽ */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -75,8 +80,8 @@ float   trig_level_ratio = 0.5f;
 uint8_t trig_edge = 0;
 
 const float v_div_table[3] = {0.01f, 0.1f, 1.0f};
-uint8_t v_div_idx1 = 1;  // CH1 ������λ
-uint8_t v_div_idx2 = 1;  // CH2 ������λ
+uint8_t v_div_idx1 = 1;  // CH1 ������λ
+uint8_t v_div_idx2 = 1;  // CH2 ������λ
 
 const float t_div_table[3] = {0.001f, 0.01f, 0.1f};
 uint8_t t_div_idx = 0;
@@ -89,20 +94,48 @@ float last_vpp2 = 0, last_f2 = 0;
 uint8_t current_mode = MODE_TRIG;
 uint8_t trig_state = 0;
 
-uint8_t active_ch = 1; // ��ǰ����ͨ����1=CH1, 2=CH2
+uint8_t active_ch = 1; // ��ǰ����ͨ����1=CH1, 2=CH2
 
 float last_phase = 0;
 uint8_t phase_init = 0;
 
 
-// ��λӳ�䣺0(10mV) ��ͨ��0��1(100mV) ��ͨ��1��2(1V) ��ͨ��2
-    // CD4051 ͨ��ѡ��λ A(PA4), B(PA5), C(PA6)
-    // ͨ�� 0: C=0, B=0, A=0 (��� 8��)
-    // ͨ�� 1: C=1, B=0, A=0 (��� 4��)
-    // ͨ�� 2: C=0, B=1, A=0 (��� 1��ֱͨ)
+// ��λӳ�䣺0(10mV) ��ͨ��0��1(100mV) ��ͨ��1��2(1V) ��ͨ��2
+    // CD4051 ͨ��ѡ��λ A(PA4), B(PA5), C(PA6)
+    // ͨ�� 0: C=0, B=0, A=0 (��� 8��)
+    // ͨ�� 1: C=1, B=0, A=0 (��� 4��)
+    // ͨ�� 2: C=0, B=1, A=0 (��� 1��ֱͨ)
 	//PA4 9 A PA5 10 B  PA6 11 C
 	//PB12 9 A PB13 10 B  PB14 11 C
 const float gain_val[3] = {40.0f, 4.0f, 1.0f}; 
+
+/* ===== 串口屏 HMI =====
+ * 屏端画面/控件 ID 约定（以 VisualTFT 编译生成的 DefineID.h 为准）：
+ *   画面 0：主界面
+ *   曲线控件：GRAPH1(ID=1)=CH1 波形(红)，GRAPH2(ID=2)=CH2 波形(蓝)，两控件重叠
+ *   文本控件：3=CH1频率 4=CH1峰峰值 5=CH1平均值
+ *             6=CH2频率 7=CH2峰峰值 8=CH2平均值
+ *             9=相位差 10=波形类型 11=模式/通道 12=档位/边沿
+ *   按钮控件：13=模式切换 14=通道选择 15=CH1档位+ 16=CH1档位-
+ *             17=CH2档位+ 18=CH2档位- 19=时基+ 20=时基-
+ *             21=触发边沿 22=触发电平+ 23=触发电平- 24=AUTOSCALE
+ */
+#define HMI_SCREEN      0
+#define HMI_GRAPH_CH1   1
+#define HMI_GRAPH_CH2   2
+#define HMI_TXT_F1      3
+#define HMI_TXT_VPP1    4
+#define HMI_TXT_AVG1    5
+#define HMI_TXT_F2      6
+#define HMI_TXT_VPP2    7
+#define HMI_TXT_AVG2    8
+#define HMI_TXT_PHASE   9
+#define HMI_TXT_WAVE    10
+#define HMI_TXT_MODE    11
+#define HMI_TXT_DIV     12
+
+uint8_t cmd_buffer[CMD_MAX_SIZE];           /* 串口屏指令接收缓存 */
+uint8_t hmi_wave_buf[DRAW_POINTS];          /* 曲线定点化数据缓存（8bit，0~255） */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -120,46 +153,46 @@ int fputc(int ch, FILE *f)
     return ch;
 }
 
-/* �л� CD4051 ����ͨ����ch=1��2, gain_idx=0,1,2 */
-/* �л� CD4051 ����ͨ����ch=1��2, gain_idx=0,1,2 */
+/* �л� CD4051 ����ͨ����ch=1��2, gain_idx=0,1,2 */
+/* �л� CD4051 ����ͨ����ch=1��2, gain_idx=0,1,2 */
 void SetGain(uint8_t ch, uint8_t gain_idx)
 {
-    if (ch == 1) // CH1 ���� PA4(A), PA5(B), PA6(C)
+    if (ch == 1) // CH1 ���� PA4(A), PA5(B), PA6(C)
     {
-        if (gain_idx == 0) // 10mV����8����ͨ��0 (A=0, B=0, C=0)
+        if (gain_idx == 0) // 10mV����8����ͨ��0 (A=0, B=0, C=0)
         {
             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
         }
-        else if (gain_idx == 1) // 100mV����4����ͨ��1 (A=0, B=0, C=1)
+        else if (gain_idx == 1) // 100mV����4����ͨ��1 (A=0, B=0, C=1)
         {
             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
         }
-        else // 1V����1����ͨ��2 (A=0, B=1, C=0)
+        else // 1V����1����ͨ��2 (A=0, B=1, C=0)
         {
             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
             HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
         }
     }
-    else if (ch == 2) // CH2 ���� PB12(A), PB13(B), PB14(C)
+    else if (ch == 2) // CH2 ���� PB12(A), PB13(B), PB14(C)
     {
-        if (gain_idx == 0) // 10mV����8����ͨ��0
+        if (gain_idx == 0) // 10mV����8����ͨ��0
         {
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
         }
-        else if (gain_idx == 1) // 100mV����4����ͨ��1 (C=1)
+        else if (gain_idx == 1) // 100mV����4����ͨ��1 (C=1)
         {
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);
         }
-        else // 1V����1����ͨ��2 (B=1)
+        else // 1V����1����ͨ��2 (B=1)
         {
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, GPIO_PIN_SET);
@@ -335,6 +368,223 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     if(GPIO_Pin == KEY0E4_Pin) key0_pressed = 1;
 }
 
+/* ===================== 串口屏 HMI 触摸交互 ===================== */
+
+/* 把 CH1/CH2 波形定点化后发送到串口屏曲线控件（8bit，0~255，采样深度1Byte）
+ * 减去直流偏置让波形居中，并按实际峰峰值自适应缩放，让波形铺满曲线区 */
+static void HMI_UpdateWave(uint16_t trig, int show_len,
+                           float avg1, float avg2, float vpp1, float vpp2)
+{
+    int i;
+    /* 按峰峰值缩放，留 25% 边距；信号太小时给个最小量程防止噪声放大 */
+    float scale1 = (vpp1 > 0.01f) ? (vpp1 * 1.25f) : 0.5f;
+    float scale2 = (vpp2 > 0.01f) ? (vpp2 * 1.25f) : 0.5f;
+
+    /* CH1 -> GRAPH1 */
+    GraphChannelDataClear(HMI_SCREEN, HMI_GRAPH_CH1, 0);
+    for(i = 0; i < DRAW_POINTS; i++)
+    {
+        uint16_t idx = (trig + (uint32_t)i * show_len / DRAW_POINTS) % ADC_BUF_SIZE;
+        float px = ((ch1_v[idx] - avg1) / scale1 + 0.5f) * 255.0f;
+        if(px < 0.0f) px = 0.0f;
+        if(px > 255.0f) px = 255.0f;
+        hmi_wave_buf[i] = (uint8_t)px;
+    }
+    GraphChannelDataAdd(HMI_SCREEN, HMI_GRAPH_CH1, 0, hmi_wave_buf, DRAW_POINTS);
+
+    /* CH2 -> GRAPH2 */
+    GraphChannelDataClear(HMI_SCREEN, HMI_GRAPH_CH2, 0);
+    for(i = 0; i < DRAW_POINTS; i++)
+    {
+        uint16_t idx = (trig + (uint32_t)i * show_len / DRAW_POINTS) % ADC_BUF_SIZE;
+        float px = ((ch2_v[idx] - avg2) / scale2 + 0.5f) * 255.0f;
+        if(px < 0.0f) px = 0.0f;
+        if(px > 255.0f) px = 255.0f;
+        hmi_wave_buf[i] = (uint8_t)px;
+    }
+    GraphChannelDataAdd(HMI_SCREEN, HMI_GRAPH_CH2, 0, hmi_wave_buf, DRAW_POINTS);
+}
+
+/* 更新串口屏上的模式/通道/档位状态文本 */
+static void HMI_UpdateStatus(void)
+{
+    char buf[64];
+    const char *mode_name = "TRIG";
+    const char *edge_name = "RISE";
+    const char *div_name[3] = {"10mV", "100mV", "1V"};
+    const char *tdiv_name[3] = {"1ms", "10ms", "100ms"};
+
+    if(current_mode == MODE_VERT) mode_name = "VERT";
+    else if(current_mode == MODE_HORI) mode_name = "HORI";
+    else if(current_mode == MODE_CH_SEL) mode_name = "CH_SEL";
+    if(trig_edge == 1) edge_name = "FALL";
+
+    sprintf(buf, "%s CH%d", mode_name, active_ch);
+    SetTextValue(HMI_SCREEN, HMI_TXT_MODE, (uchar *)buf);
+
+    sprintf(buf, "V1:%s V2:%s T:%s %s", div_name[v_div_idx1], div_name[v_div_idx2],
+            tdiv_name[t_div_idx], edge_name);
+    SetTextValue(HMI_SCREEN, HMI_TXT_DIV, (uchar *)buf);
+}
+
+/* 更新串口屏上的测量参数文本 */
+static void HMI_UpdateText(float f1, float vpp1, float avg1,
+                           float f2, float vpp2, float avg2,
+                           float phase, const char *wave_type)
+{
+    char buf[64];
+
+    sprintf(buf, "F:%.0fHz", f1);
+    SetTextValue(HMI_SCREEN, HMI_TXT_F1, (uchar *)buf);
+    sprintf(buf, "Vpp:%.3fV", vpp1);
+    SetTextValue(HMI_SCREEN, HMI_TXT_VPP1, (uchar *)buf);
+    sprintf(buf, "Vavg:%.3fV", avg1);
+    SetTextValue(HMI_SCREEN, HMI_TXT_AVG1, (uchar *)buf);
+
+    sprintf(buf, "F:%.0fHz", f2);
+    SetTextValue(HMI_SCREEN, HMI_TXT_F2, (uchar *)buf);
+    sprintf(buf, "Vpp:%.3fV", vpp2);
+    SetTextValue(HMI_SCREEN, HMI_TXT_VPP2, (uchar *)buf);
+    sprintf(buf, "Vavg:%.3fV", avg2);
+    SetTextValue(HMI_SCREEN, HMI_TXT_AVG2, (uchar *)buf);
+
+    if(phase > -900.0f) sprintf(buf, "Ph:%+.1f", phase);
+    else                sprintf(buf, "Ph:---");
+    SetTextValue(HMI_SCREEN, HMI_TXT_PHASE, (uchar *)buf);
+
+    sprintf(buf, "Wave:%s", wave_type);
+    SetTextValue(HMI_SCREEN, HMI_TXT_WAVE, (uchar *)buf);
+
+    HMI_UpdateStatus();
+}
+
+/* 串口屏指令处理入口（在主循环中轮询调用） */
+static void HMI_Process(void)
+{
+    qsize size = queue_find_cmd(cmd_buffer, CMD_MAX_SIZE);
+    if(size > 0)
+    {
+        ProcessMessage((PCTRL_MSG)cmd_buffer, size);
+    }
+}
+
+/* 消息分发：把串口屏上传的指令转换为业务回调 */
+void ProcessMessage(PCTRL_MSG msg, uint16 size)
+{
+    uint8  cmd_type     = msg->cmd_type;
+    uint8  ctrl_msg     = msg->ctrl_msg;
+    uint8  control_type = msg->control_type;
+    uint16 screen_id    = PTR2U16(&msg->screen_id);
+    uint16 control_id   = PTR2U16(&msg->control_id);
+    uint32 value        = PTR2U32(msg->param);
+
+    switch(cmd_type)
+    {
+    case NOTIFY_TOUCH_PRESS:                                    /* 触摸按下 */
+    case NOTIFY_TOUCH_RELEASE:                                  /* 触摸松开 */
+        NotifyTouchXY(cmd_buffer[1], PTR2U16(cmd_buffer + 2), PTR2U16(cmd_buffer + 4));
+        break;
+
+    case NOTIFY_CONTROL:                                        /* 控件事件 */
+        if(ctrl_msg == MSG_GET_CURRENT_SCREEN)                  /* 画面切换通知 */
+        {
+            NotifyScreen(screen_id);
+        }
+        else
+        {
+            switch(control_type)
+            {
+            case kCtrlButton:                                   /* 按钮 */
+                NotifyButton(screen_id, control_id, msg->param[1]);
+                break;
+            case kCtrlText:                                     /* 文本（键盘输入回传） */
+                NotifyText(screen_id, control_id, msg->param);
+                break;
+            default:
+                break;
+            }
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+/* 画面切换通知 */
+void NotifyScreen(uint16 screen_id)
+{
+    /* 进入主界面时，初始化两条曲线通道 */
+    if(screen_id == HMI_SCREEN)
+    {
+        GraphChannelDataClear(HMI_SCREEN, HMI_GRAPH_CH1, 0);
+        GraphChannelDataClear(HMI_SCREEN, HMI_GRAPH_CH2, 0);
+    }
+}
+
+/* 触摸坐标事件（预留） */
+void NotifyTouchXY(uint8 press, uint16 x, uint16 y)
+{
+}
+
+/* 按钮控件通知：实现功能切换（与原按键逻辑一致） */
+void NotifyButton(uint16 screen_id, uint16 control_id, uint8 state)
+{
+    if(state == 0) return;                                      /* 只响应按下 */
+
+    switch(control_id)
+    {
+    case 13:                                                    /* 模式切换 */
+        current_mode = (current_mode + 1) % 4;
+        break;
+    case 14:                                                    /* 通道选择 */
+        active_ch = (active_ch == 1) ? 2 : 1;
+        break;
+    case 15:                                                    /* CH1 垂直档位+ */
+        if(v_div_idx1 < 2) { v_div_idx1++; SetGain(1, v_div_idx1); }
+        break;
+    case 16:                                                    /* CH1 垂直档位- */
+        if(v_div_idx1 > 0) { v_div_idx1--; SetGain(1, v_div_idx1); }
+        break;
+    case 17:                                                    /* CH2 垂直档位+ */
+        if(v_div_idx2 < 2) { v_div_idx2++; SetGain(2, v_div_idx2); }
+        break;
+    case 18:                                                    /* CH2 垂直档位- */
+        if(v_div_idx2 > 0) { v_div_idx2--; SetGain(2, v_div_idx2); }
+        break;
+    case 19:                                                    /* 水平时基+ */
+        if(t_div_idx < 2) t_div_idx++;
+        break;
+    case 20:                                                    /* 水平时基- */
+        if(t_div_idx > 0) t_div_idx--;
+        break;
+    case 21:                                                    /* 触发边沿切换 */
+        trig_edge = (trig_edge == 0) ? 1 : 0;
+        break;
+    case 22:                                                    /* 触发电平+ */
+        if(trig_level_ratio < 0.95f) trig_level_ratio += 0.1f;
+        break;
+    case 23:                                                    /* 触发电平- */
+        if(trig_level_ratio > 0.05f) trig_level_ratio -= 0.1f;
+        break;
+    case 24:                                                    /* AUTOSCALE */
+        AutoScale(last_vpp1, last_f1, &v_div_idx1);
+        AutoScale(last_vpp2, last_f2, &v_div_idx2);
+        SetGain(1, v_div_idx1);
+        SetGain(2, v_div_idx2);
+        break;
+    default:
+        break;
+    }
+
+    HMI_UpdateStatus();                                         /* 立即刷新状态文本 */
+}
+
+/* 文本控件通知（键盘输入回传，预留） */
+void NotifyText(uint16 screen_id, uint16 control_id, uint8 *str)
+{
+}
+
 /* USER CODE END 0 */
 
 int main(void)
@@ -363,12 +613,11 @@ int main(void)
   }
 
   LCD_Init();
-  printf("LCD_Init done\r\n");
 
   LCD_Clear(WHITE);
   DrawGrid();
   
-  /* ��ʼ��Ӳ������ */
+  /* ��ʼ��Ӳ������ */
   SetGain(1, v_div_idx1);
   SetGain(2, v_div_idx2);
 
@@ -394,12 +643,20 @@ int main(void)
 
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
+
+  /* ===== 串口屏 HMI 初始化（USART1 = RXD0/TXD0） ===== */
+  queue_reset();
+  UartInit(115200);
+  HAL_Delay(300);   /* 等待串口屏上电初始化完毕 */
   /* USER CODE END 2 */
 
   /* Infinite loop */
   while (1)
   {
-    /* KEY0��ѭ���л�ģʽ��4��ģʽ�� */
+    /* ===== 串口屏触摸指令处理 ===== */
+    HMI_Process();
+
+    /* KEY0��ѭ���л�ģʽ��4��ģʽ�� */
     if(key0_pressed)
     {
         key0_pressed = 0;
@@ -407,12 +664,11 @@ int main(void)
         if(HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4) == GPIO_PIN_RESET)
         {
             current_mode = (current_mode + 1) % 4;
-            printf("[KEY0] Mode = %d\r\n", current_mode);
             while(HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4) == GPIO_PIN_RESET);
         }
     }
 
-    /* KEY1���޸ĵ�ǰģʽ��ֵ */
+    /* KEY1���޸ĵ�ǰģʽ��ֵ */
     {
         static uint8_t key1_last = 1;
         uint8_t key1_now = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3);
@@ -456,7 +712,7 @@ int main(void)
         key1_last = key1_now;
     }
 
-    /* KEY2����Ե�ǰѡ��ͨ������ AUTOSCALE */
+    /* KEY2����Ե�ǰѡ��ͨ������ AUTOSCALE */
     {
         static uint8_t key2_last = 1;
         uint8_t key2_now = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_2);
@@ -482,7 +738,7 @@ int main(void)
         key2_last = key2_now;
     }
 
-    /* ����ˢ�� */
+    /* ����ˢ�� */
     if(dma_ready)
     {
         dma_ready = 0;
@@ -513,7 +769,7 @@ int main(void)
         last_vpp1 = vpp1; last_f1 = freq1;
         last_vpp2 = vpp2; last_f2 = freq2;
 
-        /* ====== �����ָ��Ļ���ƽ���˲� ====== */
+        /* ====== �����ָ��Ļ���ƽ���˲� ====== */
         uint8_t mutated1 = 0, mutated2 = 0;
         if(last_f1_displayed > 0 && freq1 > 0)
         {
@@ -569,16 +825,16 @@ int main(void)
         last_f2_displayed = f2_avg;
 
 				
-				/* �� ���򲹳��߼� �� */
-        // ��Ϊ֮ǰ�� ch1_v �Ѿ��������棬����� v1_avg ������ʵ��ѹ
-        // �ȳ˻����� -> �� 50mV -> �ٳ�������
+				/* �� ���򲹳��߼� �� */
+        // ��Ϊ֮ǰ�� ch1_v �Ѿ��������棬����� v1_avg ������ʵ��ѹ
+        // �ȳ˻����� -> �� 50mV -> �ٳ�������
         v1_avg = (v1_avg * g_cur1 - 0.05f) / g_cur1;
         a1_avg = (a1_avg * g_cur1 - 0.05f) / g_cur1;
         
         v2_avg = (v2_avg * g_cur2 - 0.05f) / g_cur2;
         a2_avg = (a2_avg * g_cur2 - 0.05f) / g_cur2;
 
-        // ��ֹ���ָ���
+        // ��ֹ���ָ���
         if (v1_avg < 0) v1_avg = 0.0f;
         if (a1_avg < 0) a1_avg = 0.0f;
         if (v2_avg < 0) v2_avg = 0.0f;
@@ -635,8 +891,9 @@ int main(void)
         sprintf(buf, "V1:%d V2:%d T:%d", v_div_idx1, v_div_idx2, t_div_idx);
         LCD_ShowString(5, 86, 240, 12, 12, (uint8_t *)buf);
 
-        printf("CH1: F=%.1fHz Vpp=%.3fV | CH2: F=%.1fHz Vpp=%.3fV | Phase=%.1f Wave=%s Mode=%s CH=%d\r\n",
-               f1_avg, v1_avg, f2_avg, v2_avg, last_phase, wave_type, mode_name, active_ch);
+        /* ===== 推送到串口屏：波形曲线 + 测量参数 ===== */
+        HMI_UpdateWave(trig, show_len, a1_avg, a2_avg, v1_avg, v2_avg);
+        HMI_UpdateText(f1_avg, v1_avg, a1_avg, f2_avg, v2_avg, a2_avg, last_phase, wave_type);
     }
   }
 }
