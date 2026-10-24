@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../Drivers/F4_LCD_Driver/Inc;../Drivers/F4_TOUCH_Driver/Inc;../Drivers/AT24CXX_Driver/Inc</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../Drivers/AT24CXX_Driver/Inc</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -521,11 +521,6 @@
               </FileOption>
             </File>
             <File>
-              <FileName>fsmc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/fsmc.c</FilePath>
-            </File>
-            <File>
               <FileName>tim.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/tim.c</FilePath>
@@ -661,26 +656,6 @@
               <FileName>cmd_queue.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/cmd_queue.c</FilePath>
-            </File>
-          </Files>
-        </Group>
-        <Group>
-          <GroupName>Drivers/F4_LCD_Driver</GroupName>
-          <Files>
-            <File>
-              <FileName>lcd.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Drivers\F4_LCD_Driver\Src\lcd.c</FilePath>
-            </File>
-          </Files>
-        </Group>
-        <Group>
-          <GroupName>Drivers/F4_TOUCH_Driver</GroupName>
-          <Files>
-            <File>
-              <FileName>touch.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Drivers\F4_TOUCH_Driver\Src\touch.c</FilePath>
             </File>
           </Files>
         </Group>

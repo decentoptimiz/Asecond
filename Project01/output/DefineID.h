@@ -3,8 +3,6 @@
 
 #define  _GRAPH_SCREEN0_GRAPH1                                                 1
 
-#define  _GRAPH_SCREEN0_GRAPH2                                                 2
-
 #define  _TXT_DIS__SCREEN0_TEXT_DISPLAY1                                       3
 
 #define  _TXT_DIS__SCREEN0_TEXT_DISPLAY2                                       4

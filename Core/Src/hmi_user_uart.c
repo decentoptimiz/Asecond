@@ -55,3 +55,19 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         HAL_UART_Receive_IT(&huart1, &hmi_rx_byte, 1);
     }
 }
+
+/*!
+*   \brief  串口错误回调
+*   \detail 发生溢出等错误时清除标志并重新启动接收，避免接收中断永久停止
+*/
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if(huart->Instance == USART1)
+    {
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        __HAL_UART_CLEAR_NEFLAG(huart);
+        __HAL_UART_CLEAR_FEFLAG(huart);
+        huart->RxState = HAL_UART_STATE_READY;
+        HAL_UART_Receive_IT(&huart1, &hmi_rx_byte, 1);
+    }
+}
